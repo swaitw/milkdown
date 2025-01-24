@@ -1,55 +1,114 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createContainer, createSlice, createTimer, MilkdownPlugin, Slice, Timer } from '@milkdown/ctx';
-import { callCommandBeforeEditorView } from '@milkdown/exception';
-import type { Command } from '@milkdown/prose';
+import type { Ctx, MilkdownPlugin, SliceType } from '@milkdown/ctx'
+import { Container, createSlice, createTimer } from '@milkdown/ctx'
+import { callCommandBeforeEditorView } from '@milkdown/exception'
+import type { Command } from '@milkdown/prose/state'
 
-import { editorViewCtx, EditorViewReady } from './editor-view';
-import { SchemaReady } from './schema';
+import { withMeta } from '../__internal__'
+import { SchemaReady } from './schema'
+import { editorViewCtx } from './atoms'
 
-export type Cmd<T = undefined> = (info?: T) => Command;
-export type CmdKey<T = undefined> = Slice<Cmd<T>>;
+/// @internal
+export type Cmd<T = undefined> = (payload?: T) => Command
 
-export type CommandManager = {
-    create: <T>(meta: CmdKey<T>, value: Cmd<T>) => void;
-    get: <T>(meta: CmdKey<T>) => Cmd<T>;
-    call: <T>(meta: CmdKey<T>, info?: T) => boolean;
-};
+/// @internal
+export type CmdKey<T = undefined> = SliceType<Cmd<T>>
 
-export type CmdTuple<T = unknown> = [key: CmdKey<T>, value: Cmd<T>];
+type InferParams<T> = T extends CmdKey<infer U> ? U : never
 
-export const createCmd = <T>(key: CmdKey<T>, value: Cmd<T>): CmdTuple => [key, value] as CmdTuple;
+/// The command manager.
+/// This manager will manage all commands in editor.
+/// Generally, you don't need to use this manager directly.
+/// You can use the `$command` and `$commandAsync` in `@milkdown/utils` to create and call a command.
+export class CommandManager {
+  /// @internal
+  #container = new Container()
 
-export const commandsCtx = createSlice<CommandManager>({} as CommandManager, 'commands');
+  /// @internal
+  #ctx: Ctx | null = null
 
-export const createCmdKey = <T = undefined>(): CmdKey<T> => createSlice((() => () => false) as Cmd<T>, 'cmdKey');
+  /// @internal
+  setCtx = (ctx: Ctx) => {
+    this.#ctx = ctx
+  }
 
-export const commandsTimerCtx = createSlice<Timer[]>([], 'commandsTimer');
-export const CommandsReady = createTimer('CommandsReady');
+  get ctx() {
+    return this.#ctx
+  }
 
-export const commands: MilkdownPlugin = (pre) => {
-    const container = createContainer();
-    const commandManager: CommandManager = {
-        create: (slice, value) => slice(container.sliceMap, value),
-        get: (slice) => container.getSlice(slice).get(),
-        call: () => {
-            throw callCommandBeforeEditorView();
-        },
-    };
-    pre.inject(commandsCtx, commandManager).inject(commandsTimerCtx, [SchemaReady]).record(CommandsReady);
-    return async (ctx) => {
-        await ctx.waitTimers(commandsTimerCtx);
+  /// Register a command into the manager.
+  create<T>(meta: CmdKey<T>, value: Cmd<T>) {
+    const slice = meta.create(this.#container.sliceMap)
+    slice.set(value)
+    return slice
+  }
 
-        ctx.done(CommandsReady);
-        await ctx.wait(EditorViewReady);
+  /// Get a command from the manager.
+  get<T extends CmdKey<any>>(slice: string): Cmd<InferParams<T>>
+  get<T>(slice: CmdKey<T>): Cmd<T>
+  get(slice: string | CmdKey<any>): Cmd<any>
+  get(slice: string | CmdKey<any>): Cmd<any> {
+    return this.#container.get(slice).get()
+  }
 
-        ctx.update(commandsCtx, (prev) => ({
-            ...prev,
-            call: (meta, info) => {
-                const cmd = commandManager.get(meta);
-                const command = cmd(info);
-                const view = ctx.get(editorViewCtx);
-                return command(view.state, view.dispatch, view);
-            },
-        }));
-    };
-};
+  /// Remove a command from the manager.
+  remove<T extends CmdKey<any>>(slice: string): void
+  remove<T>(slice: CmdKey<T>): void
+  remove(slice: string | CmdKey<any>): void
+  remove(slice: string | CmdKey<any>): void {
+    return this.#container.remove(slice)
+  }
+
+  /// Call a registered command.
+  call<T extends CmdKey<any>>(slice: string, payload?: InferParams<T>): boolean
+  call<T>(slice: CmdKey<T>, payload?: T): boolean
+  call(slice: string | CmdKey<any>, payload?: any): boolean
+  call(slice: string | CmdKey<any>, payload?: any): boolean {
+    if (this.#ctx == null) throw callCommandBeforeEditorView()
+
+    const cmd = this.get(slice)
+    const command = cmd(payload)
+    const view = this.#ctx.get(editorViewCtx)
+    return command(view.state, view.dispatch, view)
+  }
+}
+
+/// Create a command key, which is a slice type that contains a command.
+export function createCmdKey<T = undefined>(key = 'cmdKey'): CmdKey<T> {
+  return createSlice((() => () => false) as Cmd<T>, key)
+}
+
+/// A slice which contains the command manager.
+export const commandsCtx = createSlice(new CommandManager(), 'commands')
+
+/// A slice which stores timers that need to be waited for before starting to run the plugin.
+/// By default, it's `[SchemaReady]`.
+export const commandsTimerCtx = createSlice([SchemaReady], 'commandsTimer')
+
+/// The timer which will be resolved when the commands plugin is ready.
+export const CommandsReady = createTimer('CommandsReady')
+
+/// The commands plugin.
+/// This plugin will create a command manager.
+///
+/// This plugin will wait for the schema plugin.
+export const commands: MilkdownPlugin = (ctx) => {
+  const cmd = new CommandManager()
+  cmd.setCtx(ctx)
+  ctx
+    .inject(commandsCtx, cmd)
+    .inject(commandsTimerCtx, [SchemaReady])
+    .record(CommandsReady)
+  return async () => {
+    await ctx.waitTimers(commandsTimerCtx)
+
+    ctx.done(CommandsReady)
+
+    return () => {
+      ctx.remove(commandsCtx).remove(commandsTimerCtx).clearTimer(CommandsReady)
+    }
+  }
+}
+
+withMeta(commands, {
+  displayName: 'Commands',
+})

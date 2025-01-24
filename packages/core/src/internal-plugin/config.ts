@@ -1,15 +1,32 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createTimer, CtxHandler, MilkdownPlugin } from '@milkdown/ctx';
+import type { Ctx, MilkdownPlugin } from '@milkdown/ctx'
+import { createTimer } from '@milkdown/ctx'
+import { withMeta } from '../__internal__'
 
-export const ConfigReady = createTimer('ConfigReady');
+/// @internal
+export type Config = (ctx: Ctx) => void | Promise<void>
 
-export const config =
-    (configure: CtxHandler): MilkdownPlugin =>
-    (pre) => {
-        pre.record(ConfigReady);
+/// The timer which will be resolved when the config plugin is ready.
+export const ConfigReady = createTimer('ConfigReady')
 
-        return async (ctx) => {
-            await configure(ctx);
-            ctx.done(ConfigReady);
-        };
-    };
+/// The config plugin.
+/// This plugin will load all user configs.
+export function config(configure: Config): MilkdownPlugin {
+  const plugin: MilkdownPlugin = (ctx) => {
+    ctx.record(ConfigReady)
+
+    return async () => {
+      await configure(ctx)
+      ctx.done(ConfigReady)
+
+      return () => {
+        ctx.clearTimer(ConfigReady)
+      }
+    }
+  }
+
+  withMeta(plugin, {
+    displayName: 'Config',
+  })
+
+  return plugin
+}

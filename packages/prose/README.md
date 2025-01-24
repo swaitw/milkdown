@@ -1,9 +1,11 @@
 # @milkdown/prose
 
-Prosemirror toolkit for [milkdown](https://saul-mirone.github.io/milkdown/).
+The prose module of [milkdown](https://milkdown.dev/).
 
-Check API on [document website](https://milkdown.dev/#/prose).
+# Official Documentation
+
+Documentation can be found on the [Milkdown website](https://milkdown.dev/docs/guide/prosemirror-api).
 
 # License
 
-Milkdown is open sourced software licensed under [MIT license](https://github.com/Saul-Mirone/milkdown/blob/main/LICENSE).
+Milkdown is open sourced software licensed under [MIT license](https://github.com/Milkdown/milkdown/blob/main/LICENSE).

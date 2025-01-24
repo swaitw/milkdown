@@ -1,4 +1,3 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import type { Node as ProseNode } from 'prosemirror-model';
+import type { Node } from '../../model'
 
-export type Predicate = (node: ProseNode) => boolean;
+export type Predicate = (node: Node) => boolean

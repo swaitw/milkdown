@@ -1,41 +1,75 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createSlice, createTimer, MilkdownPlugin, Slice, Timer } from '@milkdown/ctx';
-import { InputRule, MarkViewFactory, NodeViewFactory, Plugin, ViewFactory } from '@milkdown/prose';
-import { RemarkParser, RemarkPlugin } from '@milkdown/transformer';
-import { remark } from 'remark';
+import type { MilkdownPlugin } from '@milkdown/ctx'
+import { createTimer } from '@milkdown/ctx'
+import remarkParse from 'remark-parse'
+import remarkStringify from 'remark-stringify'
+import { unified } from 'unified'
 
-import type { Editor } from '../editor';
-import { ConfigReady } from './config';
+import type { Editor } from '../editor'
+import { remarkHandlers, withMeta } from '../__internal__'
+import { ConfigReady } from './config'
+import {
+  editorCtx,
+  initTimerCtx,
+  inputRulesCtx,
+  markViewCtx,
+  nodeViewCtx,
+  prosePluginsCtx,
+  remarkCtx,
+  remarkPluginsCtx,
+  remarkStringifyOptionsCtx,
+} from './atoms'
 
-export const InitReady = createTimer('InitReady');
+/// The timer which will be resolved when the init plugin is ready.
+export const InitReady = createTimer('InitReady')
 
-export const initTimerCtx = createSlice<Timer[]>([], 'initTimer');
-export const editorCtx = createSlice<Editor>({} as Editor, 'editor');
+/// The init plugin.
+/// This plugin prepare slices that needed by other plugins. And create a remark instance.
+///
+/// This plugin will wait for the config plugin.
+export function init(editor: Editor): MilkdownPlugin {
+  const plugin: MilkdownPlugin = (ctx) => {
+    ctx
+      .inject(editorCtx, editor)
+      .inject(prosePluginsCtx, [])
+      .inject(remarkPluginsCtx, [])
+      .inject(inputRulesCtx, [])
+      .inject(nodeViewCtx, [])
+      .inject(markViewCtx, [])
+      .inject(remarkStringifyOptionsCtx, {
+        handlers: remarkHandlers,
+      })
+      .inject(remarkCtx, unified().use(remarkParse).use(remarkStringify))
+      .inject(initTimerCtx, [ConfigReady])
+      .record(InitReady)
 
-export const inputRulesCtx = createSlice<InputRule[]>([], 'inputRules');
-export const prosePluginsCtx = createSlice<Plugin[]>([], 'prosePlugins');
-export const remarkPluginsCtx = createSlice<RemarkPlugin[]>([], 'remarkPlugins');
+    return async () => {
+      await ctx.waitTimers(initTimerCtx)
+      const options = ctx.get(remarkStringifyOptionsCtx)
+      ctx.set(
+        remarkCtx,
+        unified().use(remarkParse).use(remarkStringify, options)
+      )
 
-type View = [nodeId: string, view: ViewFactory | NodeViewFactory | MarkViewFactory];
-export const viewCtx = createSlice<View[]>([], 'nodeView');
+      ctx.done(InitReady)
 
-export const remarkCtx: Slice<RemarkParser> = createSlice(remark(), 'remark');
+      return () => {
+        ctx
+          .remove(editorCtx)
+          .remove(prosePluginsCtx)
+          .remove(remarkPluginsCtx)
+          .remove(inputRulesCtx)
+          .remove(nodeViewCtx)
+          .remove(markViewCtx)
+          .remove(remarkStringifyOptionsCtx)
+          .remove(remarkCtx)
+          .remove(initTimerCtx)
+          .clearTimer(InitReady)
+      }
+    }
+  }
+  withMeta(plugin, {
+    displayName: 'Init',
+  })
 
-export const init =
-    (editor: Editor): MilkdownPlugin =>
-    (pre) => {
-        pre.inject(editorCtx, editor)
-            .inject(prosePluginsCtx)
-            .inject(remarkPluginsCtx)
-            .inject(inputRulesCtx)
-            .inject(viewCtx)
-            .inject(remarkCtx, remark())
-            .inject(initTimerCtx, [ConfigReady])
-            .record(InitReady);
-
-        return async (ctx) => {
-            await ctx.waitTimers(initTimerCtx);
-
-            ctx.done(InitReady);
-        };
-    };
+  return plugin
+}

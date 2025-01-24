@@ -1,4 +1,6 @@
 packages:
-    - 'packages/*'
-    - 'gh-pages'
-    - 'integration-test'
+  - 'packages/*'
+  - 'packages/plugins/*'
+  - 'packages/integrations/*'
+  - e2e
+  - storybook

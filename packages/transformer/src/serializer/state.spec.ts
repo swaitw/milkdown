@@ -1,104 +1,157 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import type { Mark as ProseMark, Node as ProseNode, Schema } from '@milkdown/prose';
+import type { Mark, Schema } from '@milkdown/prose/model'
+import { describe, expect, it } from 'vitest'
+import { SerializerState } from './state'
 
-import type { InnerSerializerSpecMap } from '..';
-import { createMockMarkType, createMockNodeType } from '../parser/stack.spec';
-import { RemarkParser } from '../utility';
-import type { Stack } from './stack';
-import { State } from './state';
+const boldMark = {
+  isInSet: (arr) => arr.includes('bold'),
+  addToSet: (arr) => arr.concat('bold'),
+  type: {
+    removeFromSet: (arr) => arr.filter((x) => x !== 'bold'),
+  },
+} as unknown as Mark
 
-class MockStack implements Stack {
-    build = jest.fn();
-
-    openMark = jest.fn();
-
-    closeMark = jest.fn();
-
-    openNode = jest.fn();
-
-    addNode = jest.fn();
-
-    closeNode = jest.fn();
-
-    top = jest.fn();
-}
-
-const stack = new MockStack();
-const schema = { nodes: {}, marks: {}, text: jest.fn() } as unknown as Schema;
-const textRunner = jest.fn();
-const boldRunner = jest.fn();
-const italicRunner = jest.fn();
-const specMap: InnerSerializerSpecMap = {
-    text: {
-        match: (n: ProseNode) => n.type.name === 'text',
-        runner: textRunner,
+const schema = {
+  nodes: {
+    paragraph: {
+      spec: {
+        toMarkdown: {
+          match: (node) => node.type === 'paragraph',
+          runner: (state, node) => {
+            state.addNode('text', [], node.value)
+          },
+        },
+      },
     },
-    bold: {
-        match: (n: ProseMark) => n.type.name === 'bold',
-        runner: boldRunner,
+    blockquote: {
+      spec: {
+        toMarkdown: {
+          match: (node) => node.type === 'blockquote',
+          runner: (state, node) => {
+            state.openNode('blockquote')
+            state.next(node.content)
+            state.closeNode()
+          },
+        },
+      },
     },
-    italic: {
-        match: (n: ProseMark) => n.type.name === 'italic',
-        runner: italicRunner,
-    },
-};
+  },
+  marks: {},
+  text: (text, marks) => ({ text, marks, isText: true }),
+} as unknown as Schema
 
-const textType = createMockNodeType('text');
-const boldType = createMockMarkType('bold');
-const italicType = createMockMarkType('italic');
+describe('serializer-state', () => {
+  it('node', () => {
+    const state = new SerializerState(schema)
+    state.openNode('doc')
+    state.openNode('paragraph', 'paragraph node value', { foo: 'bar' })
+    state.addNode('text', [], 'text node value')
+    state.closeNode()
 
-describe('parser/state', () => {
-    let state: State;
-    beforeEach(() => {
-        state = new State(stack, schema, specMap);
-    });
+    expect(state.top()).toMatchObject({
+      type: 'doc',
+      children: [
+        {
+          type: 'paragraph',
+          value: 'paragraph node value',
+          children: [
+            {
+              type: 'text',
+              value: 'text node value',
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-    it('run', () => {
-        jest.spyOn(state, 'next');
-        const text = textType.create();
-        state.run(text);
+  it('maybe merge children for same mark', () => {
+    const state = new SerializerState(schema)
+    state.openNode('doc')
+    state.openNode('paragraph')
+    state.withMark(boldMark, 'bold')
+    state.addNode('text', [], 'The lunatic is on the grass.')
+    state.closeMark(boldMark)
+    state.withMark(boldMark, 'bold')
+    state.addNode('text', [], 'The lunatic is in the hell.')
+    state.closeMark(boldMark)
+    state.closeNode()
 
-        expect(state.next).toHaveBeenCalledWith(text);
-    });
+    expect(state.top()).toMatchObject({
+      type: 'doc',
+      children: [
+        {
+          type: 'paragraph',
+          children: [
+            {
+              type: 'bold',
+              isMark: true,
+              children: [
+                {
+                  type: 'text',
+                  value: 'The lunatic is on the grass.',
+                },
+                {
+                  type: 'text',
+                  value: 'The lunatic is in the hell.',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-    it('toString', () => {
-        const stringify = jest.fn();
-        state.toString({ stringify } as unknown as RemarkParser);
-        expect(stack.build).toBeCalledTimes(1);
-        expect(stringify).toBeCalledTimes(1);
-    });
+  it('build', () => {
+    const state = new SerializerState(schema)
+    state.openNode('doc')
+    state.openNode('paragraph', 'paragraph node value', { foo: 'bar' })
+    state.addNode('text', [], 'text node value')
+    state.closeNode()
 
-    it('next', () => {
-        const text = textType.create();
-        const strong = boldType.create();
-        const italic = italicType.create();
-        text.marks = [strong, italic];
+    expect(state.build()).toMatchObject({
+      type: 'doc',
+      children: [
+        {
+          type: 'paragraph',
+          value: 'paragraph node value',
+          children: [
+            {
+              type: 'text',
+              value: 'text node value',
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-        textRunner.mockClear();
-        state.next(text);
-        expect(boldRunner).toBeCalledTimes(1);
-        expect(italicRunner).toBeCalledTimes(1);
-        expect(textRunner).toBeCalledTimes(1);
-    });
+  it('next', () => {
+    const state = new SerializerState(schema)
+    state.openNode('doc')
+    state.next({
+      type: 'blockquote',
+      marks: [],
+      content: {
+        type: 'paragraph',
+        marks: [],
+        value: 'The lunatic is on the grass.',
+      },
+    } as any)
 
-    it('addNode', () => {
-        state.addNode('node');
-        expect(stack.addNode).toBeCalledWith('node');
-    });
-
-    it('openNode', () => {
-        state.openNode('node');
-        expect(stack.openNode).toBeCalledWith('node');
-    });
-
-    it('closeNode', () => {
-        state.closeNode();
-        expect(stack.closeNode).toBeCalledWith();
-    });
-
-    it('withMark', () => {
-        const bold = boldType.create();
-        state.withMark(bold, 'bold');
-        expect(stack.openMark).toBeCalledWith(bold, 'bold');
-    });
-});
+    expect(state.build()).toMatchObject({
+      type: 'doc',
+      children: [
+        {
+          type: 'blockquote',
+          children: [
+            {
+              type: 'text',
+              value: 'The lunatic is on the grass.',
+            },
+          ],
+        },
+      ],
+    })
+  })
+})
