@@ -1,137 +1,261 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import type { NodeType, Schema } from '@milkdown/prose';
+import type { MarkType, NodeType, Schema } from '@milkdown/prose/model'
+import { describe, expect, it, vi } from 'vitest'
+import { ParserState } from './state'
 
-import type { RemarkParser } from '../utility';
-import type { Stack } from './stack';
-import { State } from './state';
-import { InnerParserSpecMap } from './types';
+const docNodeType = {
+  createAndFill: vi.fn().mockImplementation((attrs, content, marks) => ({
+    name: 'docNode',
+    content,
+    attrs,
+    marks,
+  })),
+} as unknown as NodeType
+const paragraphNodeType = {
+  createAndFill: vi.fn().mockImplementation((attrs, content, marks) => ({
+    name: 'paragraphNode',
+    content,
+    attrs,
+    marks,
+  })),
+} as unknown as NodeType
+const blockquoteNodeType = {
+  createAndFill: vi.fn().mockImplementation((attrs, content, marks) => ({
+    name: 'blockquoteNode',
+    content,
+    attrs,
+    marks,
+  })),
+} as unknown as NodeType
+const boldType = {
+  create: vi.fn().mockImplementation((attrs) => ({
+    name: 'boldMark',
+    attrs,
+    addToSet: (arr) => arr.concat('bold'),
+    removeFromSet: (arr) => arr.filter((x) => x !== 'bold'),
+  })),
+  addToSet: (arr) => arr.concat('bold'),
+  removeFromSet: (arr) => arr.filter((x) => x !== 'bold'),
+} as unknown as MarkType
 
-class MockStack implements Stack {
-    build = jest.fn();
-
-    openMark = jest.fn();
-
-    closeMark = jest.fn();
-
-    addText = jest.fn();
-
-    openNode = jest.fn();
-
-    addNode = jest.fn();
-
-    closeNode = jest.fn();
-}
-
-const stack = new MockStack();
-const schema = { nodes: {}, marks: {}, text: jest.fn() } as unknown as Schema;
-const textRunner = jest.fn();
-const boldRunner = jest.fn();
-const specMap: InnerParserSpecMap = {
-    text: {
-        key: 'text',
-        is: 'node',
-        match: (n) => n.type === 'text',
-        runner: textRunner,
+const schema = {
+  nodes: {
+    paragraph: {
+      spec: {
+        parseMarkdown: {
+          match: (node) => node.type === 'paragraphNode',
+          runner: (state, node) => {
+            state.addText(node.value)
+          },
+        },
+      },
     },
-    bold: {
-        key: 'bold',
-        is: 'mark',
-        match: (n) => n.type === 'bold',
-        runner: boldRunner,
+    blockquote: {
+      spec: {
+        parseMarkdown: {
+          match: (node) => node.type === 'blockquoteNode',
+          runner: (state, node) => {
+            state.openNode(blockquoteNodeType)
+            state.next(node.children)
+            state.closeNode()
+          },
+        },
+      },
     },
-};
+  },
+  text: (text, marks) => ({ text, marks, isText: true }),
+} as unknown as Schema
 
-describe('parser/state', () => {
-    let state: State;
-    beforeEach(() => {
-        state = new State(stack, schema, specMap);
-    });
+describe('parser-state', () => {
+  it('node', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
 
-    it('run', async () => {
-        jest.spyOn(state, 'next');
-        const result: unknown[] = [];
-        const parse = jest.fn(() => result);
-        const runSync = jest.fn(() => result);
-        const mockRemark = { parse, runSync } as unknown as RemarkParser;
-        state.run(mockRemark, 'markdown');
+    state
+      .openNode(blockquoteNodeType, { id: 'blockquote' })
+      .addNode(paragraphNodeType, { id: 1 })
+      .addNode(paragraphNodeType, { id: 2 })
+      .closeNode()
 
-        expect(parse).toHaveBeenCalledWith('markdown');
-        expect(state.next).toHaveBeenCalledWith(result);
-    });
+    expect(state.top()).toMatchObject({
+      content: [
+        {
+          name: 'blockquoteNode',
+          content: [
+            {
+              name: 'paragraphNode',
+              attrs: {
+                id: 1,
+              },
+            },
+            {
+              name: 'paragraphNode',
+              attrs: {
+                id: 2,
+              },
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-    it('next', () => {
-        const textNode = { type: 'text' };
-        const boldNode = { type: 'bold' };
-        const errorNode = { type: 'error' };
+  it('mark', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
+    state.openMark(boldType).addNode(paragraphNodeType).closeMark(boldType)
 
-        state.next(textNode);
+    expect(state.top()).toMatchObject({
+      content: [
+        {
+          name: 'paragraphNode',
+          marks: ['bold'],
+        },
+      ],
+    })
+  })
 
-        expect(textRunner).toBeCalledTimes(1);
-        expect(boldRunner).toBeCalledTimes(0);
+  it('merge text for no mark', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
 
-        state.next([textNode, boldNode]);
-        expect(textRunner).toBeCalledTimes(2);
-        expect(boldRunner).toBeCalledTimes(1);
+    state
+      .openNode(paragraphNodeType)
+      .addText('The lunatic is on the grass.\n')
+      .addText("I'll see you on the dark side of the moon.")
+      .closeNode()
 
-        expect(() => state.next(errorNode)).toThrow();
-    });
+    expect(state.top()).toMatchObject({
+      content: [
+        {
+          name: 'paragraphNode',
+          content: [
+            {
+              text: "The lunatic is on the grass.\nI'll see you on the dark side of the moon.",
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-    it('injectRoot', () => {
-        jest.spyOn(state, 'next');
-        const children = [] as never[];
-        const textNode = { type: 'text', children };
-        const mockNodeType = {} as NodeType;
-        const mockAttr = {};
-        state.injectRoot(textNode, mockNodeType, mockAttr);
+  it('merge text for same mark', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
 
-        expect(stack.openNode).toBeCalledWith(mockNodeType, mockAttr);
-        expect(state.next).toBeCalledWith(children);
-    });
+    state
+      .openNode(paragraphNodeType)
+      .openMark(boldType)
+      .addText('The lunatic is on the grass.\n')
+      .addText("I'll see you on the dark side of the moon.")
+      .closeMark(boldType)
+      .closeNode()
 
-    it('addText', () => {
-        state.addText();
-        expect(stack.addText).toBeCalledTimes(1);
+    expect(state.top()).toMatchObject({
+      content: [
+        {
+          name: 'paragraphNode',
+          content: [
+            {
+              text: "The lunatic is on the grass.\nI'll see you on the dark side of the moon.",
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-        state.addText('foo');
-        expect(stack.addText).toBeCalledTimes(2);
-    });
+  it('not merge text for different marks', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
 
-    it('addNode', () => {
-        const xs = [null, null, null] as [never, never, never];
-        state.addNode(...xs);
+    state
+      .openNode(paragraphNodeType)
+      .openMark(boldType)
+      .addText('The lunatic is on the grass.\n')
+      .closeMark(boldType)
+      .addText("I'll see you on the dark side of the moon.")
+      .closeNode()
 
-        expect(stack.addNode).toBeCalledWith(...xs);
-    });
+    expect(state.top()).toMatchObject({
+      content: [
+        {
+          name: 'paragraphNode',
+          content: [
+            {
+              text: 'The lunatic is on the grass.\n',
+            },
+            {
+              text: "I'll see you on the dark side of the moon.",
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-    it('openNode', () => {
-        const xs = [null, null] as [never, never];
-        state.openNode(...xs);
+  it('build', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
 
-        expect(stack.openNode).toBeCalledWith(...xs);
-    });
+    state
+      .openNode(blockquoteNodeType, { id: 'blockquote' })
+      .addNode(paragraphNodeType, { id: 1 })
+      .addNode(paragraphNodeType, { id: 2 })
+      .closeNode()
 
-    it('closeNode', () => {
-        state.closeNode();
+    const node = state.build()
+    expect(node).toMatchObject({
+      name: 'docNode',
+      content: [
+        {
+          name: 'blockquoteNode',
+          content: [
+            {
+              name: 'paragraphNode',
+              attrs: {
+                id: 1,
+              },
+            },
+            {
+              name: 'paragraphNode',
+              attrs: {
+                id: 2,
+              },
+            },
+          ],
+        },
+      ],
+    })
+  })
 
-        expect(stack.closeNode).toBeCalledWith();
-    });
+  it('next', () => {
+    const state = new ParserState(schema)
+    state.openNode(docNodeType)
+    state.next([
+      {
+        type: 'blockquoteNode',
+        children: [
+          {
+            type: 'paragraphNode',
+            value: 'The lunatic is on the grass.',
+          },
+        ],
+      },
+    ])
 
-    it('openMark', () => {
-        const xs = [null, null] as [never, never];
-        state.openMark(...xs);
-
-        expect(stack.openMark).toBeCalledWith(...xs);
-    });
-
-    it('closeMark', () => {
-        state.closeMark(null as never);
-
-        expect(stack.closeMark).toBeCalledWith(null);
-    });
-
-    it('toDoc', () => {
-        state.toDoc();
-
-        expect(stack.build).toBeCalledTimes(1);
-    });
-});
+    const node = state.build()
+    expect(node).toMatchObject({
+      name: 'docNode',
+      content: [
+        {
+          name: 'blockquoteNode',
+          content: [
+            {
+              text: 'The lunatic is on the grass.',
+            },
+          ],
+        },
+      ],
+    })
+  })
+})
