@@ -1,33 +1,32 @@
 # Development Workflow
 
-> We use pnpm for development.
-> Please make sure you have node.js, npm and pnpm installed on your machine.
+> We use [corepack with pnpm](https://pnpm.io/installation#using-corepack) for development.
+> Please make sure you have node.js, npm installed and corepack enabled.
 
-After cloning Milkdown, run `pnpm install` to install dependencies. Then, you can run several commands:
+After cloning Milkdown, run `pnpm install` to install dependencies.
 
--   `pnpm watch` watches all packages except gh-pages.
--   `pnpm clear` remove all build dist.
--   `pnpm test:unit` runs unit test.
--   `pnpm test:pw` runs integration test.
--   `pnpm test:lint` checks the code style.
--   `pnpm test:tsc` runs typescript type checks.
--   `pnpm test` runs all possible test.
--   `pnpm doc` runs develop mode for gh-pages package.
--   `pnpm build:packs` runs build for all packages.
--   `pnpm build:doc` runs build for gh-pages package.
+1. Run `pnpm build`.
+2. Run `pnpm start` in one terminal to see storybook.
 
-The easiest way to get started is to run `pnpm watch` in one command line and `pnpm doc` in another.
-Then you can make some modify you want to see the change.
+# Commands
+
+You can run several commands:
+
+- `pnpm clear` remove all build dist.
+- `pnpm test:unit` runs unit test.
+- `pnpm test:e2e` runs e2e test.
+- `pnpm test:e2e:debug` runs e2e test with UI.
+- `pnpm test:lint` checks the code style.
+- `pnpm test:tsc` runs typescript type checks.
+- `pnpm build` runs build for all packages with cache powered by nx.
+- `pnpm commit` runs commit with git hooks.
 
 # Pre Check
 
 Before you create a pull request, please check the following todo:
 
--   Pre commit hooks passed, please don't ignore it.
--   `pnpm test` passed.
--   `pnpm build:packs` passed.
--   `pnpm build:doc` passed.
--   `pnpm preview` works as you expected.
+- Pre commit hooks passed, please don't ignore it.
+- `pnpm test` passed.
 
 # License
 

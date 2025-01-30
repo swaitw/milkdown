@@ -1,120 +1,93 @@
 name: ci
 
 on:
-    push:
-        branches: main
+  merge_group:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-    CI: true
-    PNPM_CACHE_FOLDER: .pnpm-store
+  CI: true
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
 jobs:
-    test:
-        runs-on: ubuntu-latest
-        steps:
-            - name: checkout code repository
-              uses: actions/checkout@v2
-              with:
-                  fetch-depth: 0
-            - name: setup node.js
-              uses: actions/setup-node@v2
-              with:
-                  node-version: 15.x
+  install-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: install playwright
-              run: |
-                  npx playwright install-deps
+      - uses: ./.github/actions/setup
 
-            - name: install pnpm
-              run: npm i pnpm@latest -g
-            - name: load cache
-              uses: actions/cache@v2
-              with:
-                  path: |
-                      ./.pnpm-store
-                  key: ${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-                  restore-keys: |
-                      ${{ runner.os }}
-            - name: setup pnpm config
-              run: pnpm config set store-dir $PNPM_CACHE_FOLDER
-            - name: install dependencies
-              run: pnpm install
+  lint:
+    runs-on: ubuntu-latest
+    needs: install-deps
+    steps:
+      - name: Checkout code repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: run test
-              run: |
-                  pnpm test
+      - uses: ./.github/actions/setup
 
-    release:
-        runs-on: ubuntu-latest
-        needs: test
-        steps:
-            - name: checkout code repository
-              uses: actions/checkout@v2
-              with:
-                  fetch-depth: 0
-            - name: setup node.js
-              uses: actions/setup-node@v2
-              with:
-                  node-version: 15.x
-            - name: install pnpm
-              run: npm i pnpm@latest -g
-            - name: load cache
-              uses: actions/cache@v2
-              with:
-                  path: |
-                      ./.pnpm-store
-                  key: ${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-                  restore-keys: |
-                      ${{ runner.os }}
+      - name: Run lint
+        run: pnpm test:lint --format github
 
-            - name: creating .npmrc
-              run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-            - name: setup pnpm config
-              run: pnpm config set store-dir $PNPM_CACHE_FOLDER
+  unit:
+    runs-on: ubuntu-latest
+    needs: install-deps
+    steps:
+      - name: Checkout code repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: install dependencies
-              run: pnpm install
+      - uses: ./.github/actions/setup
 
-            - name: create versions or publish to npm registry
-              uses: changesets/action@master
-              with:
-                  publish: pnpm release
-                  commit: 'ci(changeset): release milkdown'
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Run unit tests
+        run: pnpm test:unit
 
-    pages:
-        runs-on: ubuntu-latest
-        needs: test
-        steps:
-            - name: checkout code repository
-              uses: actions/checkout@v2
-              with:
-                  fetch-depth: 0
-            - name: setup node.js
-              uses: actions/setup-node@v2
-              with:
-                  node-version: 15.x
-            - name: install pnpm
-              run: npm i pnpm@latest -g
-            - name: load cache
-              uses: actions/cache@v2
-              with:
-                  path: |
-                      ./.pnpm-store
-                  key: ${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
-                  restore-keys: |
-                      ${{ runner.os }}
-            - name: setup pnpm config
-              run: pnpm config set store-dir $PNPM_CACHE_FOLDER
+  e2e:
+    runs-on: ubuntu-latest
+    needs: install-deps
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - name: Checkout code repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: install dependencies
-              run: pnpm install
-            - name: build milkdown doc
-              run: pnpm build:doc
+      - uses: ./.github/actions/setup
 
-            - name: deploy to pages
-              uses: peaceiris/actions-gh-pages@v3
-              with:
-                  github_token: ${{ secrets.GITHUB_TOKEN }}
-                  publish_dir: docs
+      - name: Install browsers
+        run: pnpm --filter=@milkdown/e2e test:install
+
+      - name: Run playwright
+        run: pnpm test:e2e -- --forbid-only --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      - name: Upload test results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-e2e-${{ matrix.shard }}
+          path: e2e/playwright-report/
+          retention-days: 7
+
+  summary:
+    if: ${{ always() }}
+    needs: [lint, unit, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: On error
+        if: ${{ needs.e2e.result != 'success' || needs.unit.result != 'success' || needs.lint.result != 'success' }}
+        run: exit 1

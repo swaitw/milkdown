@@ -1,37 +1,22 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createMockNodeType } from './stack.spec';
-import { createElement } from './stack-element';
+import { expect, it } from 'vitest'
+import { ParserStackElement } from './stack-element'
 
-const textNodeType = createMockNodeType('text');
+it('parser-stack-element', () => {
+  const type: any = {}
+  const content = []
 
-describe('parser/stack-element', () => {
-    it('create an element', () => {
-        const el1 = createElement(textNodeType, []);
-        expect(el1.type).toBe(textNodeType);
-        expect(el1.content).toEqual([]);
-        expect(el1.attrs).toBeUndefined();
+  const parserStackElement = ParserStackElement.create(type, content)
 
-        const content = [textNodeType.create(), textNodeType.create()];
-        const el2 = createElement(textNodeType, content, { foo: 'bar' });
-        expect(el2.type).toBe(textNodeType);
-        expect(el2.content).toBe(content);
-        expect(el2.attrs).toEqual({ foo: 'bar' });
-    });
+  expect(parserStackElement.type).toBe(type)
+  expect(parserStackElement.content).toBe(content)
+  expect(parserStackElement.attrs).toBeUndefined()
 
-    it('push & pop element', () => {
-        const el1 = createElement(textNodeType, []);
+  const node1: any = {}
+  const node2: any = {}
 
-        const text1 = textNodeType.create();
-        el1.push(text1);
-        expect(el1.content[0]).toBe(text1);
+  parserStackElement.push(node1, node2)
+  expect(content).toEqual([node1, node2])
 
-        const text2 = textNodeType.create();
-        const text3 = textNodeType.create();
-        el1.push(text2, text3);
-
-        expect(el1.content).toEqual([text1, text2, text3]);
-
-        expect(el1.pop()).toBe(text3);
-        expect(el1.content).toEqual([text1, text2]);
-    });
-});
+  expect(parserStackElement.pop()).toBe(node2)
+  expect(content).toEqual([node1])
+})

@@ -1,38 +1,50 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createSlice, createTimer, MilkdownPlugin, Timer } from '@milkdown/ctx';
-import type { Node as ProsemirrorNode } from '@milkdown/prose';
-import { createParser, InnerParserSpecMap, ParserSpecWithType } from '@milkdown/transformer';
+import type { MilkdownPlugin, TimerType } from '@milkdown/ctx'
+import { createSlice, createTimer } from '@milkdown/ctx'
+import { ctxCallOutOfScope } from '@milkdown/exception'
+import type { Parser } from '@milkdown/transformer'
+import { ParserState } from '@milkdown/transformer'
 
-import { marksCtx, nodesCtx } from '.';
-import { remarkCtx } from './init';
-import { schemaCtx, SchemaReady } from './schema';
+import { withMeta } from '../__internal__'
+import { remarkCtx } from './atoms'
+import { SchemaReady, schemaCtx } from './schema'
 
-export type Parser = (text: string) => ProsemirrorNode | null;
+/// The timer which will be resolved when the parser plugin is ready.
+export const ParserReady = createTimer('ParserReady')
 
-export const parserCtx = createSlice<Parser>(() => null, 'parser');
-export const parserTimerCtx = createSlice<Timer[]>([], 'parserTimer');
+const outOfScope = (() => {
+  throw ctxCallOutOfScope()
+}) as Parser
 
-export const ParserReady = createTimer('ParserReady');
+/// A slice which contains the parser.
+export const parserCtx = createSlice(outOfScope, 'parser')
 
-export const parser: MilkdownPlugin = (pre) => {
-    pre.inject(parserCtx).inject(parserTimerCtx, [SchemaReady]).record(ParserReady);
+/// A slice which stores timers that need to be waited for before starting to run the plugin.
+/// By default, it's `[SchemaReady]`.
+export const parserTimerCtx = createSlice([] as TimerType[], 'parserTimer')
 
-    return async (ctx) => {
-        await ctx.waitTimers(parserTimerCtx);
-        const nodes = ctx.get(nodesCtx);
-        const marks = ctx.get(marksCtx);
-        const remark = ctx.get(remarkCtx);
-        const schema = ctx.get(schemaCtx);
+/// The parser plugin.
+/// This plugin will create a parser.
+///
+/// This plugin will wait for the schema plugin.
+export const parser: MilkdownPlugin = (ctx) => {
+  ctx
+    .inject(parserCtx, outOfScope)
+    .inject(parserTimerCtx, [SchemaReady])
+    .record(ParserReady)
 
-        const children = [
-            ...nodes.map(([id, v]) => ({ id, ...v })).map((node) => ({ ...node, is: 'node' as const })),
-            ...marks.map(([id, v]) => ({ id, ...v })).map((mark) => ({ ...mark, is: 'mark' as const })),
-        ];
-        const spec: InnerParserSpecMap = Object.fromEntries(
-            children.map(({ id, parseMarkdown, is }) => [id, { ...parseMarkdown, is, key: id } as ParserSpecWithType]),
-        );
+  return async () => {
+    await ctx.waitTimers(parserTimerCtx)
+    const remark = ctx.get(remarkCtx)
+    const schema = ctx.get(schemaCtx)
 
-        ctx.set(parserCtx, createParser(schema, spec, remark));
-        ctx.done(ParserReady);
-    };
-};
+    ctx.set(parserCtx, ParserState.create(schema, remark))
+    ctx.done(ParserReady)
+    return () => {
+      ctx.remove(parserCtx).remove(parserTimerCtx).clearTimer(ParserReady)
+    }
+  }
+}
+
+withMeta(parser, {
+  displayName: 'Parser',
+})

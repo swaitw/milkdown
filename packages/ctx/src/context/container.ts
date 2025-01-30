@@ -1,23 +1,48 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { contextNotFound } from '@milkdown/exception';
+import { contextNotFound } from '@milkdown/exception'
 
-import { $Slice, Slice } from './slice';
+import type { Slice, SliceType } from './slice'
 
-export type Container = {
-    readonly getSlice: <T>(slice: Slice<T>) => $Slice<T>;
-    readonly sliceMap: Map<symbol, $Slice>;
-};
+/// @internal
+export type SliceMap = Map<symbol, Slice>
 
-export const createContainer = (): Container => {
-    const sliceMap: Map<symbol, $Slice> = new Map();
+/// Container is a map of slices.
+export class Container {
+  /// @internal
+  sliceMap: SliceMap = new Map()
 
-    const getSlice = <T>(slice: Slice<T>): $Slice<T> => {
-        const context = sliceMap.get(slice.id);
-        if (!context) {
-            throw contextNotFound(slice.sliceName);
-        }
-        return context as $Slice<T>;
-    };
+  /// Get a slice from the container by slice type or slice name.
+  get = <T, N extends string = string>(
+    slice: SliceType<T, N> | N
+  ): Slice<T, N> => {
+    const context =
+      typeof slice === 'string'
+        ? [...this.sliceMap.values()].find((x) => x.type.name === slice)
+        : this.sliceMap.get(slice.id)
 
-    return { getSlice, sliceMap };
-};
+    if (!context) {
+      const name = typeof slice === 'string' ? slice : slice.name
+      throw contextNotFound(name)
+    }
+    return context as Slice<T, N>
+  }
+
+  /// Remove a slice from the container by slice type or slice name.
+  remove = <T, N extends string = string>(slice: SliceType<T, N> | N): void => {
+    const context =
+      typeof slice === 'string'
+        ? [...this.sliceMap.values()].find((x) => x.type.name === slice)
+        : this.sliceMap.get(slice.id)
+
+    if (!context) return
+
+    this.sliceMap.delete(context.type.id)
+  }
+
+  /// Check if the container has a slice by slice type or slice name.
+  has = <T, N extends string = string>(slice: SliceType<T, N> | N): boolean => {
+    if (typeof slice === 'string')
+      return [...this.sliceMap.values()].some((x) => x.type.name === slice)
+
+    return this.sliceMap.has(slice.id)
+  }
+}

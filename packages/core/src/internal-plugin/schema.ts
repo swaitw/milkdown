@@ -1,58 +1,87 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { createSlice, createTimer, MilkdownPlugin, Timer } from '@milkdown/ctx';
-import type { MarkSpec, NodeSpec } from '@milkdown/prose';
-import { Schema } from '@milkdown/prose';
+import type { MilkdownPlugin, TimerType } from '@milkdown/ctx'
+import { createSlice, createTimer } from '@milkdown/ctx'
+import { Schema } from '@milkdown/prose/model'
 import type {
-    MarkParserSpec,
-    MarkSerializerSpec,
-    NodeParserSpec,
-    NodeSerializerSpec,
-    RemarkParser,
-} from '@milkdown/transformer';
+  MarkSchema,
+  NodeSchema,
+  RemarkParser,
+} from '@milkdown/transformer'
 
-import { InitReady, remarkCtx, remarkPluginsCtx } from '.';
+import { withMeta } from '../__internal__'
+import { InitReady } from './init'
+import { remarkCtx, remarkPluginsCtx } from './atoms'
 
-export const SchemaReady = createTimer('schemaReady');
+/// The timer which will be resolved when the schema plugin is ready.
+export const SchemaReady = createTimer('SchemaReady')
 
-export const schemaCtx = createSlice<Schema>({} as Schema, 'schema');
-export const schemaTimerCtx = createSlice<Timer[]>([], 'schemaTimer');
+/// A slice which stores timers that need to be waited for before starting to run the plugin.
+/// By default, it's `[InitReady]`.
+export const schemaTimerCtx = createSlice([] as TimerType[], 'schemaTimer')
 
-export type NodeSchema = {
-    readonly toMarkdown: NodeSerializerSpec;
-    readonly parseMarkdown: NodeParserSpec;
-} & Readonly<NodeSpec>;
+/// A slice which contains the schema.
+export const schemaCtx = createSlice({} as Schema, 'schema')
 
-export const nodesCtx = createSlice<[string, NodeSchema][]>([], 'nodes');
+/// A slice which stores the nodes spec.
+export const nodesCtx = createSlice([] as Array<[string, NodeSchema]>, 'nodes')
 
-export type MarkSchema = {
-    readonly toMarkdown: MarkSerializerSpec;
-    readonly parseMarkdown: MarkParserSpec;
-} & Readonly<MarkSpec>;
-export const marksCtx = createSlice<[string, MarkSchema][]>([], 'marks');
+/// A slice which stores the marks spec.
+export const marksCtx = createSlice([] as Array<[string, MarkSchema]>, 'marks')
 
-export const schema: MilkdownPlugin = (pre) => {
-    pre.inject(schemaCtx).inject(nodesCtx).inject(marksCtx).inject(schemaTimerCtx, [InitReady]).record(SchemaReady);
+function extendPriority<T extends NodeSchema | MarkSchema>(x: T): T {
+  return {
+    ...x,
+    parseDOM: x.parseDOM?.map((rule) => ({ priority: x.priority, ...rule })),
+  }
+}
 
-    return async (ctx) => {
-        await ctx.waitTimers(schemaTimerCtx);
+/// The schema plugin.
+/// This plugin will load all nodes spec and marks spec and create a schema.
+///
+/// This plugin will wait for the init plugin.
+export const schema: MilkdownPlugin = (ctx) => {
+  ctx
+    .inject(schemaCtx, {} as Schema)
+    .inject(nodesCtx, [])
+    .inject(marksCtx, [])
+    .inject(schemaTimerCtx, [InitReady])
+    .record(SchemaReady)
 
-        const remark = ctx.get(remarkCtx);
-        const remarkPlugins = ctx.get(remarkPluginsCtx);
+  return async () => {
+    await ctx.waitTimers(schemaTimerCtx)
 
-        const processor = remarkPlugins.reduce((acc: RemarkParser, plug) => acc.use(plug), remark);
-        ctx.set(remarkCtx, processor);
+    const remark = ctx.get(remarkCtx)
+    const remarkPlugins = ctx.get(remarkPluginsCtx)
 
-        const nodes = Object.fromEntries(ctx.get(nodesCtx));
-        const marks = Object.fromEntries(ctx.get(marksCtx));
+    const processor = remarkPlugins.reduce(
+      (acc: RemarkParser, plug) =>
+        acc.use(plug.plugin, plug.options) as unknown as RemarkParser,
+      remark
+    )
+    ctx.set(remarkCtx, processor)
 
-        ctx.set(
-            schemaCtx,
-            new Schema({
-                nodes,
-                marks,
-            }),
-        );
+    const nodes = Object.fromEntries(
+      ctx.get(nodesCtx).map(([key, x]) => [key, extendPriority(x)])
+    )
+    const marks = Object.fromEntries(
+      ctx.get(marksCtx).map(([key, x]) => [key, extendPriority(x)])
+    )
+    const schema = new Schema({ nodes, marks })
 
-        ctx.done(SchemaReady);
-    };
-};
+    ctx.set(schemaCtx, schema)
+
+    ctx.done(SchemaReady)
+
+    return () => {
+      ctx
+        .remove(schemaCtx)
+        .remove(nodesCtx)
+        .remove(marksCtx)
+        .remove(schemaTimerCtx)
+        .clearTimer(SchemaReady)
+    }
+  }
+}
+
+withMeta(schema, {
+  displayName: 'Schema',
+})

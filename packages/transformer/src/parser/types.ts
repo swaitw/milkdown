@@ -1,25 +1,55 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import type { MarkType, NodeType } from '@milkdown/prose';
-import type { Node } from 'unist';
+import type { MarkType, Node, NodeType } from '@milkdown/prose/model'
+import type { MarkdownNode } from '../utility/types'
 
-import type { State } from './state';
+import type { ParserState } from './state'
 
-export type Attrs = Record<string, string | number | boolean | null>;
-export type MarkdownNode = Node & { children?: MarkdownNode[]; [x: string]: unknown };
+/// The parser type which is used to transform markdown text into prosemirror node.
+export type Parser = (text: string) => Node
 
-export type ParserRunner<T extends NodeType | MarkType = NodeType | MarkType> = (
-    state: State,
-    Node: MarkdownNode,
-    proseType: T,
-) => void;
-export type ParserSpec<T extends NodeType | MarkType = NodeType | MarkType> = {
-    match: (node: MarkdownNode) => boolean;
-    runner: ParserRunner<T>;
-};
-export type NodeParserSpec = ParserSpec<NodeType>;
-export type MarkParserSpec = ParserSpec<MarkType>;
+/// The spec for node parser in schema.
+export interface NodeParserSpec {
+  /// The match function to check if the node is the target node.
+  /// For example:
+  ///
+  /// ```typescript
+  /// match: (node) => node.type === 'paragraph'
+  /// ```
+  match: (node: MarkdownNode) => boolean
+  /// The runner function to transform the node into prosemirror node.
+  /// Generally, you should call methods in `state` to add node to state.
+  /// For example:
+  ///
+  /// ```typescript
+  /// runner: (state, node, type) => {
+  ///   state
+  ///     .openNode(type)
+  ///     .next(node.children)
+  ///     .closeNode();
+  /// }
+  /// ```
+  runner: (state: ParserState, node: MarkdownNode, proseType: NodeType) => void
+}
 
-export type ParserSpecWithType =
-    | (NodeParserSpec & { is: 'node'; key: string })
-    | (MarkParserSpec & { is: 'mark'; key: string });
-export type InnerParserSpecMap = Record<string, ParserSpecWithType>;
+/// The spec for mark parser in schema.
+export interface MarkParserSpec {
+  /// The match function to check if the node is the target mark.
+  /// For example:
+  ///
+  /// ```typescript
+  /// match: (mark) => mark.type === 'emphasis'
+  /// ```
+  match: (node: MarkdownNode) => boolean
+  /// The runner function to transform the node into prosemirror mark.
+  /// Generally, you should call methods in `state` to add mark to state.
+  /// For example:
+  ///
+  /// ```typescript
+  /// runner: (state, node, type) => {
+  ///   state
+  ///     .openMark(type)
+  ///     .next(node.children)
+  ///     .closeMark(type)
+  /// }
+  /// ```
+  runner: (state: ParserState, node: MarkdownNode, proseType: MarkType) => void
+}

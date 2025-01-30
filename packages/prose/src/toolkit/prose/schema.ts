@@ -1,23 +1,19 @@
-/* Copyright 2021, Milkdown by Mirone. */
-import { getAtomFromSchemaFail } from '@milkdown/exception';
-import type { MarkType, NodeType, Schema } from 'prosemirror-model';
+import { getAtomFromSchemaFail } from '@milkdown/exception'
 
-export const getNodeFromSchema = (type: string, schema: Schema): NodeType => {
-    const target = schema.nodes[type];
+import type { MarkType, NodeType, Schema } from '../../model'
 
-    if (!target) {
-        throw getAtomFromSchemaFail('node', type);
-    }
+export function getNodeFromSchema(type: string, schema: Schema): NodeType {
+  const target = schema.nodes[type]
 
-    return target;
-};
+  if (!target) throw getAtomFromSchemaFail('node', type)
 
-export const getMarkFromSchema = (type: string, schema: Schema): MarkType => {
-    const target = schema.marks[type];
+  return target
+}
 
-    if (!target) {
-        throw getAtomFromSchemaFail('mark', type);
-    }
+export function getMarkFromSchema(type: string, schema: Schema): MarkType {
+  const target = schema.marks[type]
 
-    return target;
-};
+  if (!target) throw getAtomFromSchemaFail('mark', type)
+
+  return target
+}
